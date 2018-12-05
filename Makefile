@@ -2,23 +2,27 @@
 # Makefile
 #
 
-# TODO: remove
-# 1 proccess for node stuff
-# https://www.open-mpi.org/doc/v2.0/man1/mpirun.1.php
+# ---------------- configurations ---------------------------------------------
 
-CC= mpicc
-CFLAGS= -Wall
-
-BIN= bin/
-EXEC= $(BIN)main
-
-# default number of processors
+# default number of processes (should be equal to the number of nodes)
 NP= 4
+
+HOSTFILE= ''
+
+# ---------------- no need to change anything below this line -----------------
+
+BIN= ./bin
+EXEC= ./main
 
 # auxiliary
 MKDIR= mkdir -p
 RM= rm -f
-RUN= mpirun -np
+
+# mpi specific
+RUN= mpirun -wdir $(BIN) -np $(NP)
+ifneq ($(HOSTFILE), '')
+	RUN += -configfile $(HOSTFILE)
+endif
 
 # targets
 default: all
@@ -28,7 +32,7 @@ all:
 	cd src && $(MAKE)
 
 run: all
-	$(RUN) $(NP) $(EXEC)
+	$(RUN) $(EXEC)
 
 clean:
 	$(RM) -r bin/
