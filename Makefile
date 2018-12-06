@@ -2,10 +2,12 @@
 # Makefile
 #
 
-# ---------------- configurations ---------------------------------------------
+# ---------------- configuration ----------------------------------------------
 
 # default number of processes (should be equal to the number of nodes)
 NP= 4
+
+MPIRUN= mpiexec
 
 HOSTFILE= ''
 
@@ -19,7 +21,7 @@ MKDIR= mkdir -p
 RM= rm -f
 
 # mpi specific
-RUN= mpirun -wdir $(BIN) -np $(NP)
+RUN= $(MPIRUN) -wdir $(BIN) -np $(NP)
 ifneq ($(HOSTFILE), '')
 	RUN += -configfile $(HOSTFILE)
 endif
@@ -32,7 +34,8 @@ all:
 	cd src && $(MAKE)
 
 run: all
-	$(RUN) $(EXEC)
+	# $(RUN) $(EXEC)
+	cd bin/ && ./main "../graph.txt"
 
 clean:
 	$(RM) -r bin/
