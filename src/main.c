@@ -71,6 +71,7 @@ static void removelastcity(Tour* t);
 static void printtour(Tour*);
 
 static Stack* newstack(void);
+static void freestack(Stack*);
 static void push(Stack*, Tour*);
 static Tour* pop(Stack*);
 #define pushcopy(s, t) (push(s, copytour(t)))
@@ -97,12 +98,23 @@ static bool empty(Stack*);
 //     return 0;
 // }
 
+static int partialcost(Tour* t) {
+    if (t->count == 1) {
+        return 0;
+    }
+    int sum = 0;
+    for (int i = 0; i < t->count - 1; i++) {
+        sum += GRAPH(t->cities[i], t->cities[i + 1]);
+    }
+    return sum;
+}
+
 static bool feasible(Tour* tour, int city) {
-    // TODO: this first if is wrong
+    // TODO: I think this check is not working to reduce work
 
     // if it can lead to a least cost tour
     int lastcity = tour->cities[tour->count - 1];
-    int newcost = tour->cost + GRAPH(lastcity, city);
+    int newcost = partialcost(tour) + GRAPH(lastcity, city);
     if (newcost > best->cost) {
         return false;
     }
@@ -117,52 +129,32 @@ static bool feasible(Tour* tour, int city) {
     return true;
 }
 
-void DFS(Tour* tour) {
-    if (tour->count == n && tour->cost < best->cost) {
-        freetour(best);
-        best = copytour(tour);
-        return;
-    }
-
-    int last = tour->cities[tour->count - 1];
-
-    // for each neighboring city
-    for (int neighbor = 0; neighbor < n; neighbor++) {
-        if (last == neighbor) { continue; }
-        if (feasible(tour, neighbor)) {
-            addcity(tour, neighbor);
-            DFS(tour);
-            removelastcity(tour);
-        }
-    }
-}
-
-void stackversion(Tour* tour) {
+void stackversion(Tour* beginning) {
     Stack* stack = newstack();
+    pushcopy(stack, beginning); // the tour that visits only the home town
 
-    // pushes the tour that visits only the home town
-    pushcopy(stack, tour);
-
-    Tour* currenttour;
+    Tour* tour;
     while (!empty(stack)) {
-        currenttour = pop(stack);
+        tour = pop(stack);
 
-        if (currenttour->count == n && currenttour->cost < best->cost) {
+        if (tour->count == n && tour->cost < best->cost) {
             freetour(best);
-            best = copytour(currenttour);
+            best = copytour(tour);
         } else {
             // for each neighboring city
             for (int neighbor = n - 1; neighbor >= 0; neighbor--) {
-                if (feasible(currenttour, neighbor)) {
-                    addcity(currenttour, neighbor);
-                    pushcopy(stack, currenttour);
-                    removelastcity(currenttour);
+                if (feasible(tour, neighbor)) {
+                    addcity(tour, neighbor);
+                    pushcopy(stack, tour);
+                    removelastcity(tour);
                 }
             }
         }
 
-        freetour(currenttour);
+        freetour(tour);
     }
+
+    freestack(stack);
 }
 
 int main(int argc, char** argv) {
@@ -317,6 +309,12 @@ static Stack* newstack(void) {
     s->array = malloc(s->capacity * sizeof(Tour));
     assert(s->array);
     return s;
+}
+
+static void freestack(Stack* s) {
+    assert(empty(s));
+    free(s->array);
+    free(s);
 }
 
 static void push(Stack* s, Tour* t) {
