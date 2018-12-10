@@ -4,6 +4,13 @@
 
 # ---------------- configuration ----------------------------------------------
 
+# path to the graph file
+# GRAPH= "../small.txt"
+GRAPH= "../large.txt"
+
+# number of threads for each process (node) to use
+NTHREADS= 4
+
 # default number of processes (should be equal to the number of nodes)
 NP= 4
 
@@ -35,7 +42,7 @@ all:
 
 run: all
 	# $(RUN) $(EXEC)
-	cd bin/ && ./main "../graph.txt"
+	cd bin/ && $(EXEC) $(GRAPH) $(NTHREADS)
 
 clean:
 	$(RM) -r bin/

@@ -5,25 +5,20 @@
 #include <stdlib.h>
 
 #include <mpi.h>
+#include <pthread.h>
 
-#define DEBUG 1
+#define DEBUG 0
 
-#define ERROR(msg) do { \
-    fprintf(stderr, "\terror: " msg "\n"); \
-    exit(1); \
-} while (0); \
+// ==================================================
+//
+//  data structures & typedefs
+//
+// ==================================================
 
-#define IS_MAIN_THREAD (rank == 0)
+// TODO
+// typedef void*(ThreadFunction)(void*);
 
-// graph
 typedef int* Graph;
-#define GRAPH(i, j) (graph[i*n+j])
-
-// ==================================================
-//
-//  data structures
-//
-// ==================================================
 
 typedef struct Tour {
    int* cities; // cities in partial tour
@@ -48,12 +43,35 @@ const int START = 0;
 const int NO_CITY = -1;
 const int INFINITY = INT_MAX;
 
+// MPI
+int np;   // MPI number of processes
+int rank; // MPI rank
+
+// pthreads
+pthread_mutex_t best_tour_mutex;
+
 // important globals
 Tour* best = NULL;  // best tour
 int n;              // number of cities
 Graph graph;        // the cities' graph
-int np;             // MPI number of processes
-int rank;           // MPI rank
+
+// ==================================================
+//
+//  auxiliary macros
+//
+// ==================================================
+
+#define ERROR(msg) do { \
+    fprintf(stderr, "\terror: " msg "\n"); \
+    exit(1); \
+} while (0); \
+
+#define IS_MAIN_PROCESS (rank == 0)
+
+#define GRAPH(i, j) (graph[i*n+j])
+
+#define FIRST_CITY(t) (t->cities[0])
+#define LAST_CITY(t) (t->cities[t->count - 1])
 
 // ==================================================
 //
@@ -70,7 +88,8 @@ static Tour* newtour(void);
 static Tour* copytour(Tour*);
 static void freetour(Tour*);
 static void addcity(Tour* t, int city);
-static void removelastcity(Tour* t);
+static void removelastcity(Tour*);
+static bool visited(Tour* tour, int city);
 static void printtour(Tour*);
 
 static void updatebest(Tour*);
@@ -81,6 +100,9 @@ static void push(Stack*, Tour*);
 static Tour* pop(Stack*);
 #define pushcopy(s, t) (push(s, copytour(t)))
 static bool empty(Stack*);
+static void printstack(Stack*);
+
+static pthread_t newthread(int id, Stack* tasks);
 
 // ==================================================
 //
@@ -103,15 +125,33 @@ static bool empty(Stack*);
 //     return 0;
 // }
 
-#define FIRST_CITY(t) (t->cities[0])
-#define LAST_CITY(t) (t->cities[t->count - 1])
+Stack* BFS(Tour* beginning, int nt) {
+    // stack
+    Stack* stack = newstack();
+    pushcopy(stack, beginning); // the tour that visits only the home town
+
+    while (stack->size < nt) {
+        Tour* tour = pop(stack);
+
+        // for each neighboring city
+        for (int neighbor = 0; neighbor < n; neighbor++) {
+            if (!visited(tour, neighbor)) {
+                addcity(tour, neighbor);
+                pushcopy(stack, tour);
+                removelastcity(tour);
+            }
+        }
+
+        freetour(tour);
+    }
+
+    return stack;
+}
 
 static bool feasible(Tour* tour, int city) {
     // if the city has already been visited
-    for (int i = 0; i < tour->count; i++) {
-        if (tour->cities[i] == city) {
-            return false;
-        }
+    if (visited(tour, city)) {
+        return false;
     }
 
     // if it can lead to a least cost tour
@@ -125,9 +165,12 @@ static bool feasible(Tour* tour, int city) {
     return true;
 }
 
-void stackversion(Tour* beginning) {
-    Stack* stack = newstack();
-    pushcopy(stack, beginning); // the tour that visits only the home town
+void findbest(int id, Stack* stack) {
+    #if DEBUG
+        printf("STARTING THREAD %d\n", id);
+    #endif
+
+    // TODO: access to best->cost without locking will probably lead to errors
 
     while (!empty(stack)) {
         Tour* tour = pop(stack);
@@ -147,31 +190,67 @@ void stackversion(Tour* beginning) {
         freetour(tour);
     }
 
+    // TODO: steal work and goto top
+
     freestack(stack);
 }
 
+void* threadfindbest(void* arguments) {
+    int id = *((int*)((void**)arguments)[0]);
+    Stack* tasks = (Stack*)((void**)arguments)[1];
+    findbest(id, tasks);
+    return NULL;
+}
+
 int main(int argc, char** argv) {
-    // graph
+    // arguments (graph path & number of threads)
     const char* path = argv[1];
+    const int nthreads = atoi(argv[2]);
     loadgraph(path);
 
+    // pthreads
+    pthread_mutex_init(&best_tour_mutex, NULL);
+
     // starting tour
-    Tour* tour = newtour();
-    addcity(tour, START);
-    printtour(tour);
+    Tour* beginning = newtour();
+    addcity(beginning, START);
 
     // best tour
-    best = copytour(tour);
+    best = copytour(beginning);
     best->cost = INFINITY;
 
-    // DFS(tour);
-    stackversion(tour);
+    // dividing tasks
+    Stack* tasks = BFS(beginning, nthreads);
+    Stack* stacks[nthreads];
+    for (int i = 0; i < nthreads; i++) {
+        stacks[i] = newstack();
+    }
+    {
+        int i = 0;
+        while (!empty(tasks)) {
+            push(stacks[i], pop(tasks));
+            i = (i < nthreads - 1) ? i + 1 : 0;
+        }
+    }
+
+    // running the threads
+    pthread_t tojoin[nthreads];
+    for (int i = 0; i < nthreads; i++) {
+        tojoin[i] = newthread(i, stacks[i]);
+    }
+
+    // waiting for threads to finish
+    for (int i = 0; i < nthreads; i++) {
+        pthread_join(tojoin[i], NULL);
+    }
 
     printf("--- BEST TOUR ---\n");
     printtour(best);
 
-    free(tour);
-    free(best);
+
+    freetour(beginning);
+    freetour(best);
+    pthread_mutex_destroy(&best_tour_mutex);
     free(graph);
     return 0;
 }
@@ -295,6 +374,15 @@ static void removelastcity(Tour* t) {
     t->cities[--t->count] = NO_CITY;
 }
 
+static bool visited(Tour* tour, int city) {
+    for (int i = 0; i < tour->count; i++) {
+        if (tour->cities[i] == city) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static void printtour(Tour* tour) {
     printf("Tour = {Cost = ");
     if (tour->cost == INFINITY) {
@@ -314,12 +402,14 @@ static void printtour(Tour* tour) {
 }
 
 static void updatebest(Tour* t) {
+    pthread_mutex_lock(&best_tour_mutex);
     freetour(best);
     best = copytour(t);
     #if DEBUG
         printf("UPDATED BEST ");
         printtour(t);
     #endif
+    pthread_mutex_unlock(&best_tour_mutex);
 }
 
 static Stack* newstack(void) {
@@ -359,4 +449,34 @@ static Tour* pop(Stack* s) {
 
 static bool empty(Stack* s) {
     return s->size == 0;
+}
+
+static void printstack(Stack* stack) {
+    printf("Stack = {\n");
+    printf("\tSize = %d\n", stack->size);
+    printf("\tCapacity = %d\n", stack->capacity);
+    printf("\tTours = [[\n");
+
+    for (int i = stack->size - 1; i >= 0; i--) {
+        printf("\t\t");
+        printtour(stack->array[i]);
+    }
+
+    printf("\t]]\n}\n");
+}
+
+static pthread_t newthread(int id, Stack* tasks) {
+    int* idpointer = malloc(sizeof(int));
+    assert(idpointer);
+    *idpointer = id;
+
+    void** arguments = malloc(2 * sizeof(void*));
+    assert(arguments);
+
+    arguments[0] = idpointer;
+    arguments[1] = tasks;
+
+    pthread_t thread;
+    pthread_create(&thread, NULL, threadfindbest, arguments);
+    return thread;
 }
