@@ -3,7 +3,8 @@
 #
 
 CC= mpicc
-CFLAGS= -Wall -Werror -std=c99
+# CFLAGS= -Wall -Werror -std=c99
+CFLAGS= -Wall -g
 
 OBJS= main.o
 TO_BIN= ../bin/main
