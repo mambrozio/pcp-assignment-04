@@ -30,9 +30,9 @@ typedef struct Tour {
 } Tour;
 
 typedef struct Stack {
-   Tour** list; // list of tours (the tasks)
-   int list_sz; // TODO
-   int list_alloc; // TODO
+   int size;        // size of the stack
+   int capacity;    // capacity of the stack (size^3)
+   Tour** array;    // array of tours (the tasks)
 } Stack;
 
 // ==================================================
@@ -62,12 +62,19 @@ int rank;           // MPI rank
 static void mpiassert(int result);
 static void loadgraph(const char* path);
 static void printgraph(void);
+
 static Tour* newtour(void);
 static Tour* copytour(Tour*);
 static void freetour(Tour*);
 static void addcity(Tour* t, int city);
 static void removelastcity(Tour* t);
 static void printtour(Tour*);
+
+static Stack* newstack(void);
+static void push(Stack*, Tour*);
+static Tour* pop(Stack*);
+#define pushcopy(s, t) (push(s, copytour(t)))
+static bool empty(Stack*);
 
 // ==================================================
 //
@@ -91,6 +98,8 @@ static void printtour(Tour*);
 // }
 
 static bool feasible(Tour* tour, int city) {
+    // TODO: this first if is wrong
+
     // if it can lead to a least cost tour
     int lastcity = tour->cities[tour->count - 1];
     int newcost = tour->cost + GRAPH(lastcity, city);
@@ -128,6 +137,34 @@ void DFS(Tour* tour) {
     }
 }
 
+void stackversion(Tour* tour) {
+    Stack* stack = newstack();
+
+    // pushes the tour that visits only the home town
+    pushcopy(stack, tour);
+
+    Tour* currenttour;
+    while (!empty(stack)) {
+        currenttour = pop(stack);
+
+        if (currenttour->count == n && currenttour->cost < best->cost) {
+            freetour(best);
+            best = copytour(currenttour);
+        } else {
+            // for each neighboring city
+            for (int neighbor = n - 1; neighbor >= 0; neighbor--) {
+                if (feasible(currenttour, neighbor)) {
+                    addcity(currenttour, neighbor);
+                    pushcopy(stack, currenttour);
+                    removelastcity(currenttour);
+                }
+            }
+        }
+
+        freetour(currenttour);
+    }
+}
+
 int main(int argc, char** argv) {
     // graph
     const char* path = argv[1];
@@ -139,7 +176,8 @@ int main(int argc, char** argv) {
     printtour(tour);
     best = copytour(tour);
 
-    DFS(tour);
+    // DFS(tour);
+    stackversion(tour);
 
     printf("--- BEST TOUR ---\n");
     printtour(best);
@@ -176,6 +214,7 @@ static void loadgraph(const char* path) {
 
     // weights
     graph = malloc(n*n*sizeof(int));
+    assert(graph);
     for (int i = 0; i < n; i++) {
         for (int j = 0; j < n; j++) {
             fscanf(file, "%d", &graph[i*n + j]);
@@ -206,7 +245,9 @@ static void printgraph(void) {
 
 static Tour* newtour(void) {
     Tour* t = malloc(sizeof(Tour));
+    assert(t);
     t->cities = malloc(n * sizeof(int));
+    assert(t->cities);
     for (int i = 0; i < n; i++) {
         t->cities[i] = NO_CITY;
     }
@@ -251,13 +292,13 @@ static void removelastcity(Tour* t) {
 }
 
 static void printtour(Tour* tour) {
-    printf("Tour = {\n\tCost = ");
+    printf("Tour = {Cost = ");
     if (tour->cost == INFINITY) {
         printf("INFINITY");
     } else {
         printf("%d", tour->cost);
     }
-    printf("\n\tCities (%d) = {", tour->count);
+    printf(", Cities (%d) = {", tour->count);
     for (int i = 0; i < tour->count; i++) {
         printf("%d", tour->cities[i]);
         if (i == tour->count - 1) {
@@ -265,5 +306,29 @@ static void printtour(Tour* tour) {
         }
         printf(", ");
     }
-    printf("}\n}\n");
+    printf("}}\n");
+}
+
+static Stack* newstack(void) {
+    Stack* s = malloc(sizeof(Stack));
+    assert(s);
+    s->size = 0;
+    s->capacity = n*n*n;
+    s->array = malloc(s->capacity * sizeof(Tour));
+    assert(s->array);
+    return s;
+}
+
+static void push(Stack* s, Tour* t) {
+    s->array[s->size++] = t;
+    assert(s->size != s->capacity);
+}
+
+static Tour* pop(Stack* s) {
+    assert(!empty(s));
+    return s->array[--s->size];
+}
+
+static bool empty(Stack* s) {
+    return s->size == 0;
 }
