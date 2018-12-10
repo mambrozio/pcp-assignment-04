@@ -6,6 +6,8 @@
 
 #include <mpi.h>
 
+#define DEBUG 1
+
 #define ERROR(msg) do { \
     fprintf(stderr, "\terror: " msg "\n"); \
     exit(1); \
@@ -60,6 +62,7 @@ int rank;           // MPI rank
 // ==================================================
 
 static void mpiassert(int result);
+
 static void loadgraph(const char* path);
 static void printgraph(void);
 
@@ -69,6 +72,8 @@ static void freetour(Tour*);
 static void addcity(Tour* t, int city);
 static void removelastcity(Tour* t);
 static void printtour(Tour*);
+
+static void updatebest(Tour*);
 
 static Stack* newstack(void);
 static void freestack(Stack*);
@@ -98,32 +103,23 @@ static bool empty(Stack*);
 //     return 0;
 // }
 
-static int partialcost(Tour* t) {
-    if (t->count == 1) {
-        return 0;
-    }
-    int sum = 0;
-    for (int i = 0; i < t->count - 1; i++) {
-        sum += GRAPH(t->cities[i], t->cities[i + 1]);
-    }
-    return sum;
-}
+#define FIRST_CITY(t) (t->cities[0])
+#define LAST_CITY(t) (t->cities[t->count - 1])
 
 static bool feasible(Tour* tour, int city) {
-    // TODO: I think this check is not working to reduce work
-
-    // if it can lead to a least cost tour
-    int lastcity = tour->cities[tour->count - 1];
-    int newcost = partialcost(tour) + GRAPH(lastcity, city);
-    if (newcost > best->cost) {
-        return false;
-    }
-
-    // if the vertex has already been visited
+    // if the city has already been visited
     for (int i = 0; i < tour->count; i++) {
         if (tour->cities[i] == city) {
             return false;
         }
+    }
+
+    // if it can lead to a least cost tour
+    addcity(tour, city);
+    int newcost = tour->cost;
+    removelastcity(tour);
+    if (newcost > best->cost) {
+        return false;
     }
 
     return true;
@@ -133,13 +129,10 @@ void stackversion(Tour* beginning) {
     Stack* stack = newstack();
     pushcopy(stack, beginning); // the tour that visits only the home town
 
-    Tour* tour;
     while (!empty(stack)) {
-        tour = pop(stack);
-
+        Tour* tour = pop(stack);
         if (tour->count == n && tour->cost < best->cost) {
-            freetour(best);
-            best = copytour(tour);
+            updatebest(tour);
         } else {
             // for each neighboring city
             for (int neighbor = n - 1; neighbor >= 0; neighbor--) {
@@ -166,7 +159,10 @@ int main(int argc, char** argv) {
     Tour* tour = newtour();
     addcity(tour, START);
     printtour(tour);
+
+    // best tour
     best = copytour(tour);
+    best->cost = INFINITY;
 
     // DFS(tour);
     stackversion(tour);
@@ -244,7 +240,7 @@ static Tour* newtour(void) {
         t->cities[i] = NO_CITY;
     }
     t->count = 0;
-    t->cost = INFINITY;
+    t->cost = 0;
     return t;
 }
 
@@ -267,19 +263,35 @@ static void freetour(Tour* t) {
 }
 
 static void addcity(Tour* t, int city) {
-    t->cities[t->count++] = city;
     if (t->count == n) {
-        t->cost = GRAPH(t->cities[t->count - 1], t->cities[0]);
-        for (int i = t->count - 1; i > 0; i--) {
-            t->cost += GRAPH(t->cities[i - 1], t->cities[i]);
-        }
+        ERROR("invalid number of cities in tour");
+    }
+
+    if (t->count > 0) {
+        t->cost += GRAPH(LAST_CITY(t), city);
+    }
+    t->cities[t->count++] = city;
+
+    if (t->count == n) {
+        t->cost += GRAPH(LAST_CITY(t), FIRST_CITY(t));
     }
 }
 
 static void removelastcity(Tour* t) {
-    if (t->count == n) {
-        t->cost = INFINITY;
+    if (t->count <= 1) {
+        ERROR("invalid number of cities in tour");
     }
+
+    if (t->count == n) {
+        t->cost -= GRAPH(LAST_CITY(t), FIRST_CITY(t));
+    }
+
+    if (t->count == 2) {
+        t->cost = 0;
+    } else {
+        t->cost -= GRAPH(t->cities[t->count - 2], LAST_CITY(t));
+    }
+    
     t->cities[--t->count] = NO_CITY;
 }
 
@@ -301,6 +313,15 @@ static void printtour(Tour* tour) {
     printf("}}\n");
 }
 
+static void updatebest(Tour* t) {
+    freetour(best);
+    best = copytour(t);
+    #if DEBUG
+        printf("UPDATED BEST ");
+        printtour(t);
+    #endif
+}
+
 static Stack* newstack(void) {
     Stack* s = malloc(sizeof(Stack));
     assert(s);
@@ -320,11 +341,20 @@ static void freestack(Stack* s) {
 static void push(Stack* s, Tour* t) {
     s->array[s->size++] = t;
     assert(s->size != s->capacity);
+    #if DEBUG
+        printf("PUSH ");
+        printtour(t);
+    #endif
 }
 
 static Tour* pop(Stack* s) {
     assert(!empty(s));
-    return s->array[--s->size];
+    Tour* t = s->array[--s->size];
+    #if DEBUG
+        printf("POP ");
+        printtour(t);
+    #endif
+    return t;
 }
 
 static bool empty(Stack* s) {
