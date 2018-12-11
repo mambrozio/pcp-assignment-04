@@ -4,7 +4,7 @@
 
 CC= mpicc
 # CFLAGS= -Wall -Werror -std=c99
-CFLAGS= -Wall -g
+CFLAGS= -Wall -Wno-unused-function -g
 
 OBJS= main.o
 TO_BIN= ../bin/main
