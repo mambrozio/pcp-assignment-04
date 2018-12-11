@@ -6,7 +6,8 @@
 
 # path to the graph file
 # GRAPH= "../small.txt"
-GRAPH= "../large.txt"
+GRAPH= "../medium.txt"
+# GRAPH= "../large.txt"
 
 # number of threads for each process (node) to use
 NTHREADS= 4

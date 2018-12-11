@@ -49,11 +49,17 @@ int rank; // MPI rank
 
 // pthreads
 pthread_mutex_t best_tour_mutex;
+pthread_mutex_t global_stack_mutex;
+pthread_cond_t global_stack_full;
+pthread_cond_t global_stack_empty;
+Stack* global_stack;
 
 // important globals
-Tour* best = NULL;  // best tour
-int n;              // number of cities
-Graph graph;        // the cities' graph
+Tour* best = NULL;       // best tour
+int n;                   // number of cities
+Graph graph;             // the cities' graph
+int waiting_threads = 0; // number of threads waiting on global_stack_empty
+int nthreads;            // number of threads
 
 // ==================================================
 //
@@ -65,8 +71,6 @@ Graph graph;        // the cities' graph
     fprintf(stderr, "\terror: " msg "\n"); \
     exit(1); \
 } while (0); \
-
-#define IS_MAIN_PROCESS (rank == 0)
 
 #define GRAPH(i, j) (graph[i*n+j])
 
@@ -100,6 +104,7 @@ static void push(Stack*, Tour*);
 static Tour* pop(Stack*);
 #define pushcopy(s, t) (push(s, copytour(t)))
 static bool empty(Stack*);
+static bool full(Stack*);
 static void printstack(Stack*);
 
 static pthread_t newthread(int id, Stack* tasks);
@@ -109,21 +114,6 @@ static pthread_t newthread(int id, Stack* tasks);
 //  functions
 //
 // ==================================================
-
-// // TODO
-// int main(int argc, char** argv) {
-//     mpiassert(MPI_Init(&argc, &argv));
-//     mpiassert(MPI_Comm_size(MPI_COMM_WORLD, &np));
-//     mpiassert(MPI_Comm_rank(MPI_COMM_WORLD, &rank));
-
-//     printf("--- rank: %d\n", rank);
-
-//     if (IS_MAIN_THREAD) {
-//         mpiassert(MPI_Finalize());
-//     }
-
-//     return 0;
-// }
 
 Stack* BFS(Tour* beginning, int nt) {
     // stack
@@ -170,10 +160,12 @@ void findbest(int id, Stack* stack) {
         printf("STARTING THREAD %d\n", id);
     #endif
 
-    // TODO: access to best->cost without locking will probably lead to errors
-
     while (!empty(stack)) {
         Tour* tour = pop(stack);
+        if (!tour) {
+            goto END;
+        }
+
         if (tour->count == n && tour->cost < best->cost) {
             updatebest(tour);
         } else {
@@ -190,9 +182,8 @@ void findbest(int id, Stack* stack) {
         freetour(tour);
     }
 
-    // TODO: steal work and goto top
-
-    freestack(stack);
+    END:
+        freestack(stack);
 }
 
 void* threadfindbest(void* arguments) {
@@ -202,14 +193,34 @@ void* threadfindbest(void* arguments) {
     return NULL;
 }
 
+// TODO
 int main(int argc, char** argv) {
     // arguments (graph path & number of threads)
     const char* path = argv[1];
-    const int nthreads = atoi(argv[2]);
+    nthreads = atoi(argv[2]);
     loadgraph(path);
 
+    // MPI
+    mpiassert(MPI_Init(&argc, &argv));
+    mpiassert(MPI_Comm_size(MPI_COMM_WORLD, &np));
+    mpiassert(MPI_Comm_rank(MPI_COMM_WORLD, &rank));
+
+    #if DEBUG
+        printf("RANK %d\n", rank);
+    #endif
+
+    
+    
+    mpiassert(MPI_Finalize());
+    return 0;
+}
+
+int main(int argc, char** argv) {
     // pthreads
     pthread_mutex_init(&best_tour_mutex, NULL);
+    pthread_mutex_init(&global_stack_mutex, NULL);
+    pthread_cond_init(&global_stack_full, NULL);
+    pthread_cond_init(&global_stack_empty, NULL);
 
     // starting tour
     Tour* beginning = newtour();
@@ -232,6 +243,7 @@ int main(int argc, char** argv) {
             i = (i < nthreads - 1) ? i + 1 : 0;
         }
     }
+    freestack(tasks);
 
     // running the threads
     pthread_t tojoin[nthreads];
@@ -247,11 +259,13 @@ int main(int argc, char** argv) {
     printf("--- BEST TOUR ---\n");
     printtour(best);
 
-
     freetour(beginning);
     freetour(best);
-    pthread_mutex_destroy(&best_tour_mutex);
     free(graph);
+    pthread_mutex_destroy(&best_tour_mutex);
+    pthread_mutex_destroy(&global_stack_mutex);
+    pthread_cond_destroy(&global_stack_full);
+    pthread_cond_destroy(&global_stack_empty);
     return 0;
 }
 
@@ -429,8 +443,19 @@ static void freestack(Stack* s) {
 }
 
 static void push(Stack* s, Tour* t) {
-    s->array[s->size++] = t;
-    assert(s->size != s->capacity);
+    if (full(s)) {
+        pthread_mutex_lock(&global_stack_mutex);
+        while (full(global_stack)) {
+            pthread_cond_wait(&global_stack_full, &global_stack_mutex);
+        }
+        for (int i = 0; i < (s->size / 2) - 1; i++) {
+            global_stack->array[global_stack->size++] = pop(s);
+        }
+        global_stack->array[global_stack->size++] = t;
+        pthread_mutex_unlock(&global_stack_mutex);
+    } else {
+        s->array[s->size++] = t;
+    }
     #if DEBUG
         printf("PUSH ");
         printtour(t);
@@ -438,8 +463,24 @@ static void push(Stack* s, Tour* t) {
 }
 
 static Tour* pop(Stack* s) {
-    assert(!empty(s));
-    Tour* t = s->array[--s->size];
+    Tour* t;
+    if (empty(s)) {
+        pthread_mutex_lock(&global_stack_mutex);
+        while (empty(global_stack)) {
+            if (++waiting_threads == nthreads) {
+                return NULL;
+            }
+            pthread_cond_wait(&global_stack_empty, &global_stack_mutex);
+            waiting_threads--;
+        }
+        t = global_stack->array[--global_stack->size];
+        for (int i = 0; i < (global_stack->size / 2) - 1; i++) {
+            push(s, pop(global_stack));
+        }
+        pthread_mutex_unlock(&global_stack_mutex);
+    } else {
+        t = s->array[--s->size];
+    }
     #if DEBUG
         printf("POP ");
         printtour(t);
@@ -449,6 +490,10 @@ static Tour* pop(Stack* s) {
 
 static bool empty(Stack* s) {
     return s->size == 0;
+}
+
+static bool full(Stack* s) {
+    return s->size == s->capacity;
 }
 
 static void printstack(Stack* stack) {
