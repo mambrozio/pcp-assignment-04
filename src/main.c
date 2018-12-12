@@ -10,7 +10,7 @@
 #include "stack.h"
 #include "tour.h"
 
-#define DEBUG 1
+#define DEBUG 0
 
 // ==================================================
 //
@@ -76,8 +76,18 @@ static pthread_t newthread(int id, Stack* stacks);
 
 static Stack** dividework(Tour* tour, int n);
 
-static void sendtours(Tour**, int, int);
-static Tour** receivetours(int*, int);
+// send & receive
+
+#define send_int(data, destination, tag) \
+    (MPI_Send(&data, 1, MPI_INT, destination, tag, MPI_COMM_WORLD)) \
+
+#define receive_int(address, source, tag, status) \
+    (MPI_Recv(address, 1, MPI_INT, source, tag, MPI_COMM_WORLD, status)) \
+
+static void send_tour(Tour*, int destination);
+static Tour* receive_tour(int source);
+static void send_tours(Tour**, int n, int destination);
+static Tour** receive_tours(int source, int* n);
 
 // ==================================================
 //
@@ -136,20 +146,7 @@ void findbest(int id, Stack* stack) {
     Tour* tour;
     while ((tour = popwork(stack))) {
         if (tour->count == ncities && tour->cost < best->cost) {
-printf("%d ---- findbest 1\n", id);
-            MPI_Send(&id, 1, MPI_INT, MASTER, MPI_TAG_SENDING_TOUR, MPI_COMM_WORLD);
-printf("%d ---- findbest 2\n", id);
-            sendtours(&tour, 1, MASTER);
-printf("%d ---- findbest 3\n", id);
-            int i;
-            Tour** received_tour = receivetours(&i, MASTER);
-printf("%d ---- i: %d\n", id, i);
-tour_print(*received_tour);
-            if ((*received_tour)->cost < tour->cost) {
-                updatebest(*received_tour);
-            } else {
-                updatebest(tour);
-            }
+            updatebest(tour);
         } else {
             for (int neighbor = 0; neighbor < ncities; neighbor++) {
                 if (feasible(tour, neighbor)) {
@@ -176,41 +173,6 @@ void* threadfindbest(void* arguments) {
     return NULL;
 }
 
-static void sendtours(Tour** tours, int n, int to) {
-    MPI_Send(&n, 1, MPI_INT, to, MPI_TAG_TOUR_N, MPI_COMM_WORLD);
-    for (int i = 0; i < n; i++) {
-        MPI_Send(&tours[i]->cost, 1, MPI_INT, to, MPI_TAG_TOUR_COST,
-            MPI_COMM_WORLD);
-        int count = tours[i]->count;
-        MPI_Send(&count, 1, MPI_INT, to, MPI_TAG_TOUR_COUNT, MPI_COMM_WORLD);
-        for (int j = 0; j < count; j++) {
-            MPI_Send(&tours[i]->cities[j], 1, MPI_INT, to, MPI_TAG_TOUR_CITIES,
-                MPI_COMM_WORLD);
-        }
-    }
-}
-
-static Tour** receivetours(int* n, int from) {
-    MPI_Status s;
-
-    MPI_Recv(n, 1, MPI_INT, from, MPI_TAG_TOUR_N, MPI_COMM_WORLD, &s);
-printf("%d ---- receive %d\n", from, *n);
-    Tour** tours = malloc(*n * sizeof(Tour*));
-    for (int i = 0; i < *n; i++) {
-        tours[i] = tour_new(ncities);
-        MPI_Recv(&tours[i]->cost, 1, MPI_INT, from, MPI_TAG_TOUR_COST,
-            MPI_COMM_WORLD, &s);
-        MPI_Recv(&tours[i]->count, 1, MPI_INT, from, MPI_TAG_TOUR_COUNT,
-            MPI_COMM_WORLD, &s);
-        for (int j = 0; j < tours[i]->count; j++) {
-            MPI_Recv(&tours[i]->cities[j], 1, MPI_INT, from,
-                MPI_TAG_TOUR_CITIES, MPI_COMM_WORLD, &s);
-        }
-    }
-
-    return tours;
-}
-
 void master(void) {
     // starting tour
     Tour* beginning = tour_new(ncities);
@@ -230,7 +192,7 @@ void master(void) {
             tours[j++] = stack_pop(stack);
         }
 
-        sendtours(tours, ntours, i + 1);
+        send_tours(tours, ntours, i + 1);
 
         // freeing memory
         stack_free(nodestacks[i]);
@@ -238,37 +200,46 @@ void master(void) {
             tour_free(tours[k]);
         }
     }
+    free(nodestacks);
 
     // best tour
     best = tour_new(ncities);
     best->cost = INFINITY;
 
-    int all = 0;
     MPI_Status s;
-    while (all != np) {
-        int id;
-        int i;
-        MPI_Recv(&id, 1, MPI_INT, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &s);
-printf("%d ---- master 1\n", id);
-printf("%d ---- master %d\n", id, s.MPI_TAG);
-        if (s.MPI_TAG == MPI_TAG_SENDING_TOUR) {
-            Tour** received_tour = receivetours(&i, id);
-tour_print(*received_tour);
-            if ((*received_tour)->cost < best->cost) {
-                updatebest(*received_tour);
+    for (int all = 1; all < np;) {
+        int source;
+        receive_int(&source, MPI_ANY_SOURCE, MPI_ANY_TAG, &s);
+        switch (s.MPI_TAG) {
+            case MPI_TAG_SENDING_TOUR: {
+                Tour* received = receive_tour(source);
+                assert(received);
+                assert(received->count == ncities);
+                if (received->cost < best->cost) {
+                    tour_free(best);
+                    best = received;
+                } else {
+                    tour_free(received);
+                }
+                send_tour(best, source);
+                break;
             }
-            sendtours(&best, 1, id);
-        } else if (s.MPI_TAG == MPI_TAG_DONE) {
-            all++;
+            case MPI_TAG_DONE: {
+                all++;
+                break;
+            }
+        default:
+            assert(false);
         }
     }
 
-    free(nodestacks);
+    printf("Best ");
+    tour_print(best);
 }
 
 void worker(void) {
     int ntours;
-    Tour** tours = receivetours(&ntours, MASTER);
+    Tour** tours = receive_tours(MASTER, &ntours);
 
     // global stack
     global_stack = stack_new(ncities * ncities * ncities);
@@ -304,9 +275,8 @@ void worker(void) {
         pthread_join(tojoin[i], NULL);
     }
 
-    int i = 1;
-    MPI_Send(&i, 1, MPI_INT, MASTER, MPI_TAG_DONE, MPI_COMM_WORLD);
-    tour_print(best);
+    int data = 1;
+    send_int(data, MASTER, MPI_TAG_DONE);
 
     tour_free(best);
     graph_free();
@@ -356,13 +326,22 @@ static void mpiassert(int result) {
     assert(result == MPI_SUCCESS);
 }
 
-static void updatebest(Tour* t) {
+// important: does not free tour
+static void updatebest(Tour* tour) {
     pthread_mutex_lock(&best_tour_mutex);
+
+    // sending a local best to master and potentially receiving a global best
+    send_int(rank, MASTER, MPI_TAG_SENDING_TOUR);
+    send_tour(tour, MASTER);
+    tour = receive_tour(MASTER);
+
+    // replacing the best tour
     tour_free(best);
-    best = tour_copy(t);
+    best = tour_copy(tour);
+
     #if DEBUG
         printf("UPDATED BEST ");
-        tour_print(t);
+        tour_print(tour);
     #endif
     pthread_mutex_unlock(&best_tour_mutex);
 }
@@ -446,4 +425,40 @@ static Stack** dividework(Tour* tour, int n) {
     }
     stack_free(stack);
     return divided;
+}
+
+static void send_tour(Tour* tour, int to) {
+    send_int(tour->cost, to, MPI_TAG_TOUR_COST);
+    send_int(tour->count, to, MPI_TAG_TOUR_COUNT);
+    for (int i = 0; i < tour->count; i++) {
+        send_int(tour->cities[i], to, MPI_TAG_TOUR_CITIES);
+    }
+}
+
+static Tour* receive_tour(int source) {
+    MPI_Status status;
+    Tour* tour = tour_new(ncities);
+    receive_int(&tour->cost, source, MPI_TAG_TOUR_COST, &status);
+    receive_int(&tour->count, source, MPI_TAG_TOUR_COUNT, &status);
+    for (int i = 0; i < tour->count; i++) {
+        receive_int(&tour->cities[i], source, MPI_TAG_TOUR_CITIES, &status);
+    }
+    return tour;
+}
+
+static void send_tours(Tour** tours, int n, int to) {
+    send_int(n, to, MPI_TAG_TOUR_N);
+    for (int i = 0; i < n; i++) {
+        send_tour(tours[i], to);
+    }
+}
+
+static Tour** receive_tours(int from, int* n) {
+    MPI_Status status;
+    receive_int(n, from, MPI_TAG_TOUR_N, &status);
+    Tour** tours = malloc(*n * sizeof(Tour*));
+    for (int i = 0; i < *n; i++) {
+        tours[i] = receive_tour(from);
+    }
+    return tours;
 }

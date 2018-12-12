@@ -10,10 +10,10 @@ GRAPH= "../medium.txt"
 # GRAPH= "../large.txt"
 
 # number of threads for each process (node) to use
-NTHREADS= 2
+NTHREADS= 4
 
 # default number of processes (should be equal to the number of nodes)
-NP= 2
+NP= 3
 
 MPIRUN= mpiexec
 
