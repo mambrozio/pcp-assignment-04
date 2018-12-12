@@ -6,7 +6,7 @@ CC= mpicc
 # CFLAGS= -Wall -Werror -std=c99
 CFLAGS= -Wall -Wno-unused-function -g
 
-OBJS= main.o
+OBJS= main.o stack.o tour.o graph.o
 TO_BIN= ../bin/main
 
 # auxiliary
@@ -25,4 +25,7 @@ all: $(OBJS)
 clean:
 	$(RM) -r *.o
 
-main.o: main.c
+main.o: main.c stack.h tour.h graph.h
+stack.o: stack.c tour.h
+tour.o: tour.c graph.h
+graph.o: graph.c
