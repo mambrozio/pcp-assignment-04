@@ -113,6 +113,8 @@ static bool empty(Stack*);
 static bool full(Stack*);
 static void printstack(Stack*);
 
+static void globalpush(Stack*, Tour*);
+static Tour* globalpop(Stack*);
 static void pushwork(Stack*, Tour*);
 static Tour* popwork(Stack*);
 #define pushcopywork(s, t) (pushwork(s, copytour(t)))
@@ -569,49 +571,49 @@ static void printstack(Stack* stack) {
     printf("\t]]\n}\n");
 }
 
-static void pushwork(Stack* tasks, Tour* tour) {
-    #if DEBUG
-        printf("GLOBAL\n");
-    #endif
-    if (full(tasks)) {
-        pthread_mutex_lock(&global_stack_mutex);
-        while (full(global_stack)) {
-            pthread_cond_wait(&global_stack_full, &global_stack_mutex);
+static void globalpush(Stack* stack, Tour* tour) {
+    pthread_mutex_lock(&global_stack_mutex);
+    while (full(global_stack)) {
+        pthread_cond_wait(&global_stack_full, &global_stack_mutex);
+    }
+    for (int i = 0; i < (stack->size / 2) - 1; i++) {
+        push(global_stack, pop(stack));
+    }
+    push(global_stack, tour);
+    pthread_cond_broadcast(&global_stack_empty);
+    pthread_mutex_unlock(&global_stack_mutex);
+}
+
+static Tour* globalpop(Stack* stack) {
+    pthread_mutex_lock(&global_stack_mutex);
+    while (empty(global_stack)) {
+        if (++waiting_threads == nthreads) {
+            return NULL;
         }
-        for (int i = 0; i < (tasks->size / 2) - 1; i++) {
-            push(global_stack, pop(tasks));
-        }
-        push(global_stack, tour);
-        pthread_mutex_unlock(&global_stack_mutex);
+        pthread_cond_wait(&global_stack_empty, &global_stack_mutex);
+        waiting_threads--;
+    }
+    Tour* tour = pop(global_stack);
+    for (int i = 0; i < (global_stack->size / 2) - 1; i++) {
+        push(stack, pop(global_stack));
+    }
+    pthread_cond_broadcast(&global_stack_full);
+    pthread_mutex_unlock(&global_stack_mutex);
+    return tour;
+}
+
+static void pushwork(Stack* stack, Tour* tour) {
+    if (full(stack)) {
+        globalpush(stack, tour);
     } else {
-        push(tasks, tour);
+        push(stack, tour);
     }
 }
 
-static Tour* popwork(Stack* tasks) {
-    #if DEBUG
-        printf("GLOBAL\n");
-    #endif
-    Tour* tour;
-    if (empty(tasks)) {
-        pthread_mutex_lock(&global_stack_mutex);
-        while (empty(global_stack)) {
-            if (++waiting_threads == nthreads) {
-                return NULL;
-            }
-            pthread_cond_wait(&global_stack_empty, &global_stack_mutex);
-            waiting_threads--;
-        }
-        tour = pop(global_stack);
-        for (int i = 0; i < (global_stack->size / 2) - 1; i++) {
-            push(tasks, pop(global_stack));
-        }
-        pthread_mutex_unlock(&global_stack_mutex);
-    } else {
-        tour = pop(tasks);
-    }
-    return tour;
+static Tour* popwork(Stack* stack) {
+    return (empty(stack)) ? globalpop(stack) : pop(stack);
 }
+
 
 static pthread_t newthread(int id, Stack* tasks) {
     int* idpointer = malloc(sizeof(int));
