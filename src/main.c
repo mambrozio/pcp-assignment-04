@@ -136,13 +136,14 @@ void findbest(int id, Stack* stack) {
     Tour* tour;
     while ((tour = popwork(stack))) {
         if (tour->count == ncities && tour->cost < best->cost) {
-            updatebest(tour);
             MPI_Send(&id, 1, MPI_INT, MASTER, MPI_TAG_SENDING_TOUR, MPI_COMM_WORLD);
             sendtours(&tour, 1, MASTER);
-            int i = 1;
+            int i;
             Tour** received_tour = receivetours(&i, MASTER);
-            if (received_tour[0]->cost < best->cost) {
+            if ((*received_tour)->cost < tour->cost) {
                 updatebest(*received_tour);
+            } else {
+                updatebest(tour);
             }
         } else {
             for (int neighbor = 0; neighbor < ncities; neighbor++) {
@@ -237,7 +238,7 @@ void master(void) {
     MPI_Status s;
     while (all != np) {
         int id;
-        int i = 1;
+        int i;
         MPI_Recv(&id, 1, MPI_INT, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &s);
         if (s.MPI_TAG == MPI_TAG_SENDING_TOUR) {
             Tour** received_tour = receivetours(&i, id);
