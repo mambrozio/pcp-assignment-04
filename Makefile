@@ -6,8 +6,8 @@
 
 # path to the graph file
 # GRAPH= "../small.txt"
-GRAPH= "../medium.txt"
-# GRAPH= "../large.txt"
+# GRAPH= "../medium.txt"
+GRAPH= "../large.txt"
 
 # number of threads for each process (node) to use
 NTHREADS= 4
@@ -31,7 +31,7 @@ RM= rm -f
 # mpi specific
 RUN= $(MPIRUN) -wdir $(BIN) -np $(NP)
 ifneq ($(HOSTFILE), '')
-	RUN += -configfile $(HOSTFILE)
+	RUN += -f $(HOSTFILE)
 endif
 
 # targets

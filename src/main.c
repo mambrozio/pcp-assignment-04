@@ -233,8 +233,8 @@ void master(void) {
         }
     }
 
-    printf("Best ");
-    tour_print(best);
+    //printf("Best ");
+    //tour_print(best);
 }
 
 void worker(void) {
@@ -292,6 +292,8 @@ int main(int argc, char** argv) {
     graph_load(argv[1]);
     nthreads = atoi(argv[2]);
     ncities = graph_size;
+    double t1 = 0.0;
+    double t2 = 0.0;
 
     // MPI
     mpiassert(MPI_Init(&argc, &argv));
@@ -303,7 +305,9 @@ int main(int argc, char** argv) {
     #endif
 
     if (rank == MASTER) {
+        t1 = MPI_Wtime();
         master();
+        t2 = MPI_Wtime();
     } else {
         worker();
     }
@@ -311,6 +315,12 @@ int main(int argc, char** argv) {
     #if DEBUG
         printf("FINILIZED RANK %d\n", rank);
     #endif
+
+    if (rank == MASTER) {
+        printf("Elapsed time: %.25f", t2 - t1);
+        printf("Best route");
+        tour_print(best);
+    }
 
     mpiassert(MPI_Finalize());
     return 0;
