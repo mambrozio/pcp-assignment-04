@@ -254,7 +254,10 @@ printf("%d ---- master %d\n", id, s.MPI_TAG);
         if (s.MPI_TAG == MPI_TAG_SENDING_TOUR) {
             Tour** received_tour = receivetours(&i, id);
 tour_print(*received_tour);
-            updatebest(*received_tour);
+            if ((*received_tour)->cost < best->cost) {
+                updatebest(*received_tour);
+            }
+            sendtours(&best, 1, id);
         } else if (s.MPI_TAG == MPI_TAG_DONE) {
             all++;
         }
