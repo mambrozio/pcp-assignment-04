@@ -206,11 +206,11 @@ void master(void) {
     best = tour_new(ncities);
     best->cost = INFINITY;
 
-    MPI_Status s;
+    MPI_Status status;
     for (int all = 1; all < np;) {
         int source;
-        receive_int(&source, MPI_ANY_SOURCE, MPI_ANY_TAG, &s);
-        switch (s.MPI_TAG) {
+        receive_int(&source, MPI_ANY_SOURCE, MPI_ANY_TAG, &status);
+        switch (status.MPI_TAG) {
             case MPI_TAG_SENDING_TOUR: {
                 Tour* received = receive_tour(source);
                 assert(received);
