@@ -239,10 +239,6 @@ void master(void) {
         }
     }
 
-    // best tour
-    best = tour_new(ncities);
-    best->cost = INFINITY;
-
     int all = 0;
     MPI_Status s;
     while (all != np) {
