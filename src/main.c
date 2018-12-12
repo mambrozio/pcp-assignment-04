@@ -10,7 +10,7 @@
 #include "stack.h"
 #include "tour.h"
 
-#define DEBUG 0
+#define DEBUG 1
 
 // ==================================================
 //
@@ -136,10 +136,15 @@ void findbest(int id, Stack* stack) {
     Tour* tour;
     while ((tour = popwork(stack))) {
         if (tour->count == ncities && tour->cost < best->cost) {
+printf("%d ---- findbest 1\n", id);
             MPI_Send(&id, 1, MPI_INT, MASTER, MPI_TAG_SENDING_TOUR, MPI_COMM_WORLD);
+printf("%d ---- findbest 2\n", id);
             sendtours(&tour, 1, MASTER);
+printf("%d ---- findbest 3\n", id);
             int i;
             Tour** received_tour = receivetours(&i, MASTER);
+printf("%d ---- i: %d\n", id, i);
+tour_print(*received_tour);
             if ((*received_tour)->cost < tour->cost) {
                 updatebest(*received_tour);
             } else {
@@ -189,7 +194,7 @@ static Tour** receivetours(int* n, int from) {
     MPI_Status s;
 
     MPI_Recv(n, 1, MPI_INT, from, MPI_TAG_TOUR_N, MPI_COMM_WORLD, &s);
-
+printf("%d ---- receive %d\n", from, *n);
     Tour** tours = malloc(*n * sizeof(Tour*));
     for (int i = 0; i < *n; i++) {
         tours[i] = tour_new(ncities);
@@ -234,14 +239,21 @@ void master(void) {
         }
     }
 
+    // best tour
+    best = tour_new(ncities);
+    best->cost = INFINITY;
+
     int all = 0;
     MPI_Status s;
     while (all != np) {
         int id;
         int i;
         MPI_Recv(&id, 1, MPI_INT, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &s);
+printf("%d ---- master 1\n", id);
+printf("%d ---- master %d\n", id, s.MPI_TAG);
         if (s.MPI_TAG == MPI_TAG_SENDING_TOUR) {
             Tour** received_tour = receivetours(&i, id);
+tour_print(*received_tour);
             updatebest(*received_tour);
         } else if (s.MPI_TAG == MPI_TAG_DONE) {
             all++;
