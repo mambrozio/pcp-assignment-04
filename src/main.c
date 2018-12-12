@@ -26,7 +26,6 @@ const int DEFAULT_STACK_SIZE = 64;
 // MPI
 int np;   // MPI number of processes
 int rank; // MPI rank
-MPI_Datatype mpi_stack;
 
 // pthreads
 pthread_mutex_t best_tour_mutex;
@@ -37,8 +36,7 @@ Stack* global_stack;
 
 // important globals
 Tour* best = NULL;       // best tour
-int ncities;             // number of cities // TODO
-int global_stack_size; // TODO
+int ncities;             // number of cities
 int waiting_threads = 0; // number of threads waiting on global_stack_empty
 int nthreads;            // number of threads
 
@@ -72,7 +70,7 @@ static Tour* popwork(Stack*);
 
 #define pushcopywork(s, t) (pushwork(s, tour_copy(t)))
 
-static pthread_t newthread(int id, Stack* tasks);
+static pthread_t newthread(int id, Stack* stacks);
 
 static Stack** dividework(Tour* tour, int n);
 
@@ -130,12 +128,8 @@ void findbest(int id, Stack* stack) {
         printf("STARTING THREAD %d\n", id);
     #endif
 
-    while (!stack_empty(stack)) {
-        Tour* tour = popwork(stack);
-        if (!tour) {
-            goto END;
-        }
-
+    Tour* tour;
+    while ((tour = popwork(stack))) {
         if (tour->count == ncities && tour->cost < best->cost) {
             updatebest(tour);
         } else {
@@ -151,18 +145,16 @@ void findbest(int id, Stack* stack) {
         tour_free(tour);
     }
 
-    END: {
-        stack_free(stack);
-        #if DEBUG
-            printf("ENDING THREAD %d\n", id);
-        #endif
-    }
+    stack_free(stack);
+    #if DEBUG
+        printf("ENDING THREAD %d\n", id);
+    #endif
 }
 
 void* threadfindbest(void* arguments) {
     int id = *((int*)((void**)arguments)[0]);
-    Stack* tasks = (Stack*)((void**)arguments)[1];
-    findbest(id, tasks);
+    Stack* stack = (Stack*)((void**)arguments)[1];
+    findbest(id, stack);
     return NULL;
 }
 
@@ -207,11 +199,11 @@ void master(void) {
     tour_add_city(beginning, START);
 
     // dividing tasks
-    Stack** nodetasks = dividework(beginning, np);
+    Stack** nodestacks = dividework(beginning, np);
 
     // sending tasks
     for (int i = 0; i < np - 1; i++) {
-        Stack* stack = nodetasks[i];
+        Stack* stack = nodestacks[i];
         int ntours = stack->size;
         Tour** tours = malloc(ntours * sizeof(Tour*));
 
@@ -223,13 +215,13 @@ void master(void) {
         sendtours(tours, ntours, i + 1);
 
         // freeing memory
-        stack_free(nodetasks[i]);
+        stack_free(nodestacks[i]);
         for (int k = 0; k < ntours; k++) {
             tour_free(tours[k]);
         }
     }
 
-    free(nodetasks);
+    free(nodestacks);
 }
 
 void worker(void) {
@@ -334,15 +326,12 @@ static void updatebest(Tour* t) {
 static void globalpush(Stack* stack, Tour* tour) {
     pthread_mutex_lock(&global_stack_mutex);
     while (stack_full(global_stack)) {
-        assert(false);
         pthread_cond_wait(&global_stack_full, &global_stack_mutex);
     }
-    for (int i = 0; i < (stack->size / 2) - 1; i++) {
-        printf("size %d, capacity %d\n", global_stack->size, global_stack->capacity);
+    int half = (stack->size / 2) - 1;
+    for (int i = 0; i < half; i++) {
         stack_push(global_stack, stack_pop(stack));
-        printf("2\n");
     }
-    printf("-----------\n");
     stack_push(global_stack, tour);
     pthread_cond_broadcast(&global_stack_empty);
     pthread_mutex_unlock(&global_stack_mutex);
@@ -351,15 +340,17 @@ static void globalpush(Stack* stack, Tour* tour) {
 static Tour* globalpop(Stack* stack) {
     pthread_mutex_lock(&global_stack_mutex);
     while (stack_empty(global_stack)) {
-        assert(false);
         if (++waiting_threads == nthreads) {
+            pthread_cond_broadcast(&global_stack_empty);
+            pthread_mutex_unlock(&global_stack_mutex);
             return NULL;
         }
         pthread_cond_wait(&global_stack_empty, &global_stack_mutex);
         waiting_threads--;
     }
     Tour* tour = stack_pop(global_stack);
-    for (int i = 0; i < (global_stack->size / 2) - 1; i++) {
+    int half = (stack->size / 2) - 1;
+    for (int i = 0; i < half; i++) {
         stack_push(stack, stack_pop(global_stack));
     }
     pthread_cond_broadcast(&global_stack_full);
@@ -380,7 +371,7 @@ static Tour* popwork(Stack* stack) {
 }
 
 
-static pthread_t newthread(int id, Stack* tasks) {
+static pthread_t newthread(int id, Stack* stack) {
     int* idpointer = malloc(sizeof(int));
     assert(idpointer);
     *idpointer = id;
@@ -389,7 +380,7 @@ static pthread_t newthread(int id, Stack* tasks) {
     assert(arguments);
 
     arguments[0] = idpointer;
-    arguments[1] = tasks;
+    arguments[1] = stack;
 
     pthread_t thread;
     pthread_create(&thread, NULL, threadfindbest, arguments);
