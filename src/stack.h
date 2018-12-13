@@ -13,6 +13,7 @@ extern Stack* stack_new(int capacity);
 extern void   stack_free(Stack*);
 extern void   stack_push(Stack*, Tour*);
 extern Tour*  stack_pop(Stack*);
+extern void   stack_transfer(Stack* from, Stack* to);
 extern void   stack_print(Stack*);
 
 #define stack_push_copy(s, t) (stack_push(s, tour_copy(t)))

@@ -364,10 +364,8 @@ static void globalpush(Stack* stack, Tour* tour) {
     while (stack_full(global_stack)) {
         wait_(&global_stack_full, &global_stack_mutex, "global_stack_full");
     }
-    Tour* t;
-    while ((t = stack_pop(tour))) {
-        stack_push(global_stack, t);
-    }
+    // empties the local stack in the global stack
+    stack_transfer(stack, global_stack);
     stack_push(stack, tour);
     pthread_cond_broadcast(&global_stack_empty);
     unlock(&global_stack_mutex, "globalpush");

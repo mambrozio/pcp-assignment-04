@@ -30,6 +30,13 @@ Tour* stack_pop(Stack* stack) {
     return (stack_empty(stack)) ? NULL : stack->array[--stack->size];
 }
 
+void stack_transfer(Stack* from, Stack* to) {
+    for (int i = 0; i < from->size; i++) {
+        stack_push(to, from->array[i]);
+    }
+    from->size = 0;
+}
+
 void stack_print(Stack* stack) {
     printf("Stack = {\n");
     printf("\tSize = %d\n", stack->size);
