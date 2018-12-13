@@ -10,7 +10,7 @@
 #include "stack.h"
 #include "tour.h"
 
-#define DEBUG 1
+#define DEBUG 0
 
 // ==================================================
 //
@@ -294,7 +294,7 @@ int main(int argc, char** argv) {
     graph_load(argv[1]);
     nthreads = atoi(argv[2]);
     ncities = graph_size;
-    DEFAULT_STACK_SIZE = ncities*ncities;
+    DEFAULT_STACK_SIZE = ncities*ncities / 4;
     double t1 = 0.0;
     double t2 = 0.0;
 
@@ -381,6 +381,17 @@ static Tour* globalpop(Stack* stack) {
         }
         wait_(&global_stack_empty, &global_stack_mutex, "global_stack_empty");
         waiting_threads--;
+    }
+    {
+        Stack* temporary = stack_new(DEFAULT_STACK_SIZE);
+        for (int i = 0; i < DEFAULT_STACK_SIZE - 1; i++) {
+            stack_push(temporary, stack_pop(global_stack));
+        }
+        Tour* tour;
+        while ((tour = stack_pop(temporary))) {
+            stack_push(stack, tour);
+        }
+        stack_free(temporary);
     }
     Tour* tour = stack_pop(global_stack);
     pthread_cond_broadcast(&global_stack_full);
@@ -494,7 +505,7 @@ static void lock(pthread_mutex_t* mutex, const char* id) {
 
 static void unlock(pthread_mutex_t* mutex, const char* id) {
     #if DEBUG
-        printf("TRYING TO REALEASE LOCK <%s>\n", id);
+        printf("TRYING TO RELEASE LOCK <%s>\n", id);
     #endif
     pthread_mutex_unlock(mutex);
     #if DEBUG
