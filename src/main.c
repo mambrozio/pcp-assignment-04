@@ -22,6 +22,7 @@
 const int MASTER = 0;
 const int START = 0;
 const int DEFAULT_STACK_SIZE = 64;
+const int BIG_STACK_SIZE = 20000;
 
 // MPI
 int np;   // MPI number of processes
@@ -96,7 +97,7 @@ static Tour** receive_tours(int source, int* n);
 // ==================================================
 
 Stack* BFS(Tour* beginning, int nt) {
-    Stack* stack = stack_new(ncities * ncities * ncities);
+    Stack* stack = stack_new(BIG_STACK_SIZE);
     stack_push_copy(stack, beginning);
 
     while (stack->size < nt) {
@@ -239,7 +240,7 @@ void worker(void) {
     Tour** tours = receive_tours(MASTER, &ntours);
 
     // global stack
-    global_stack = stack_new(ncities * ncities * ncities);
+    global_stack = stack_new(BIG_STACK_SIZE);
 
     // pthreads
     pthread_mutex_init(&best_tour_mutex, NULL);
