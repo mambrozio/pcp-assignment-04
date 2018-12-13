@@ -78,7 +78,6 @@ static pthread_t newthread(int id, Stack* stacks);
 static Stack** dividework(Tour* tour, int n);
 
 // send & receive
-
 #define send_int(data, destination, tag) \
     (MPI_Send(&data, 1, MPI_INT, destination, tag, MPI_COMM_WORLD)) \
 
@@ -89,6 +88,11 @@ static void send_tour(Tour*, int destination);
 static Tour* receive_tour(int source);
 static void send_tours(Tour**, int n, int destination);
 static Tour** receive_tours(int source, int* n);
+
+// locking
+static void lock(pthread_mutex_t* mutex, const char* id);
+static void unlock(pthread_mutex_t* mutex, const char* id);
+static void wait_(pthread_cond_t* cv, pthread_mutex_t* m, const char* id);
 
 // ==================================================
 //
@@ -334,26 +338,6 @@ static void mpiassert(int result) {
     assert(result == MPI_SUCCESS);
 }
 
-static void lock(pthread_mutex_t* mutex, const char* id) {
-    #if DEBUG
-        printf("TRYING TO ACQUIRE LOCK <%s>\n", id);
-    #endif
-    pthread_mutex_lock(mutex);
-    #if DEBUG
-        printf("ACQUIRED LOCK <%s>\n", id);
-    #endif
-}
-
-static void unlock(pthread_mutex_t* mutex, const char* id) {
-    #if DEBUG
-        printf("TRYING TO REALEASE LOCK <%s>\n", id);
-    #endif
-    pthread_mutex_unlock(mutex);
-    #if DEBUG
-        printf("RELEASED LOCK <%s>\n", id);
-    #endif
-}
-
 // important: does not free tour
 static void updatebest(Tour* tour) {
     lock(&best_tour_mutex, "updatebest");
@@ -377,13 +361,7 @@ static void updatebest(Tour* tour) {
 static void globalpush(Stack* stack, Tour* tour) {
     lock(&global_stack_mutex, "globalpush");
     while (stack_full(global_stack)) {
-        #if DEBUG
-            printf("-- RANK %d WAITING (global_stack_full)\n", rank);
-        #endif
-        pthread_cond_wait(&global_stack_full, &global_stack_mutex);
-        #if DEBUG
-            printf("-- RANK %d DONE (global_stack_full)\n", rank);
-        #endif
+        wait_(&global_stack_full, &global_stack_mutex, "global_stack_full");
     }
     // int half = (stack->size / 2) - 1;
     // for (int i = 0; i < half; i++) {
@@ -402,13 +380,7 @@ static Tour* globalpop(Stack* stack) {
             unlock(&global_stack_mutex, "globalpop-done");
             return NULL;
         }
-        #if DEBUG
-            printf("-- RANK %d WAITING (global_stack_empty)\n", rank);
-        #endif
-        pthread_cond_wait(&global_stack_empty, &global_stack_mutex);
-        #if DEBUG
-            printf("-- RANK %d DONE (global_stack_empty)\n", rank);
-        #endif
+        wait_(&global_stack_empty, &global_stack_mutex, "global_stack_empty");
         waiting_threads--;
     }
     Tour* tour = stack_pop(global_stack);
@@ -467,6 +439,12 @@ static Stack** dividework(Tour* tour, int n) {
     return divided;
 }
 
+// ==================================================
+//
+//  send & receive
+//
+// ==================================================
+
 static void send_tour(Tour* tour, int to) {
     send_int(tour->cost, to, MPI_TAG_TOUR_COST);
     send_int(tour->count, to, MPI_TAG_TOUR_COUNT);
@@ -501,4 +479,40 @@ static Tour** receive_tours(int from, int* n) {
         tours[i] = receive_tour(from);
     }
     return tours;
+}
+
+// ==================================================
+//
+//  locking
+//
+// ==================================================
+
+static void lock(pthread_mutex_t* mutex, const char* id) {
+    #if DEBUG
+        printf("TRYING TO ACQUIRE LOCK <%s>\n", id);
+    #endif
+    pthread_mutex_lock(mutex);
+    #if DEBUG
+        printf("ACQUIRED LOCK <%s>\n", id);
+    #endif
+}
+
+static void unlock(pthread_mutex_t* mutex, const char* id) {
+    #if DEBUG
+        printf("TRYING TO REALEASE LOCK <%s>\n", id);
+    #endif
+    pthread_mutex_unlock(mutex);
+    #if DEBUG
+        printf("RELEASED LOCK <%s>\n", id);
+    #endif
+}
+
+static void wait_(pthread_cond_t* cv, pthread_mutex_t* m, const char* id) {
+    #if DEBUG
+        printf("-- WAITING <%s>\n", id);
+    #endif
+    pthread_cond_wait(cv, m);
+    #if DEBUG
+        printf("-- DONE WAITING <%s>\n", id);
+    #endif
 }
