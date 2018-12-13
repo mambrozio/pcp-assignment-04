@@ -10,7 +10,7 @@
 #include "stack.h"
 #include "tour.h"
 
-#define DEBUG 0
+#define DEBUG 1
 
 // ==================================================
 //
@@ -356,7 +356,13 @@ static void updatebest(Tour* tour) {
 static void globalpush(Stack* stack, Tour* tour) {
     pthread_mutex_lock(&global_stack_mutex);
     while (stack_full(global_stack)) {
+        #if DEBUG
+            printf("-- RANK %d WAITING (global_stack_full)\n", rank);
+        #endif
         pthread_cond_wait(&global_stack_full, &global_stack_mutex);
+        #if DEBUG
+            printf("-- RANK %d DONE (global_stack_full)\n", rank);
+        #endif
     }
     // int half = (stack->size / 2) - 1;
     // for (int i = 0; i < half; i++) {
@@ -375,7 +381,13 @@ static Tour* globalpop(Stack* stack) {
             pthread_mutex_unlock(&global_stack_mutex);
             return NULL;
         }
+        #if DEBUG
+            printf("-- RANK %d WAITING (global_stack_empty)\n", rank);
+        #endif
         pthread_cond_wait(&global_stack_empty, &global_stack_mutex);
+        #if DEBUG
+            printf("-- RANK %d DONE (global_stack_empty)\n", rank);
+        #endif
         waiting_threads--;
     }
     Tour* tour = stack_pop(global_stack);
