@@ -6,14 +6,14 @@
 
 # path to the graph file
 # GRAPH= "../small.txt"
-# GRAPH= "../medium.txt"
-GRAPH= "../large.txt"
+GRAPH= "../medium.txt"
+# GRAPH= "../large.txt"
 
 # number of threads for each process (node) to use
 NTHREADS= 4
 
 # default number of processes (should be equal to the number of nodes)
-NP= 3
+NP= 5
 
 MPIRUN= mpiexec
 
