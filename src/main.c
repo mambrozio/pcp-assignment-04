@@ -333,9 +333,29 @@ static void mpiassert(int result) {
     assert(result == MPI_SUCCESS);
 }
 
+static void lock(pthread_mutex_t* mutex, const char* id) {
+    #if DEBUG
+        printf("TRYING TO ACQUIRE LOCK <%s>\n", id);
+    #endif
+    pthread_mutex_lock(mutex);
+    #if DEBUG
+        printf("ACQUIRED LOCK <%s>\n", id);
+    #endif
+}
+
+static void unlock(pthread_mutex_t* mutex, const char* id) {
+    #if DEBUG
+        printf("TRYING TO REALEASE LOCK <%s>\n", id);
+    #endif
+    pthread_mutex_unlock(mutex);
+    #if DEBUG
+        printf("RELEASED LOCK <%s>\n", id);
+    #endif
+}
+
 // important: does not free tour
 static void updatebest(Tour* tour) {
-    pthread_mutex_lock(&best_tour_mutex);
+    lock(&best_tour_mutex, "updatebest");
 
     // sending a local best to master and potentially receiving a global best
     send_int(rank, MASTER, MPI_TAG_SENDING_TOUR);
@@ -350,11 +370,11 @@ static void updatebest(Tour* tour) {
         printf("UPDATED BEST ");
         tour_print(tour);
     #endif
-    pthread_mutex_unlock(&best_tour_mutex);
+    unlock(&best_tour_mutex, "updatebest");
 }
 
 static void globalpush(Stack* stack, Tour* tour) {
-    pthread_mutex_lock(&global_stack_mutex);
+    lock(&global_stack_mutex, "globalpush");
     while (stack_full(global_stack)) {
         #if DEBUG
             printf("-- RANK %d WAITING (global_stack_full)\n", rank);
@@ -370,15 +390,15 @@ static void globalpush(Stack* stack, Tour* tour) {
     // }
     stack_push(global_stack, tour);
     pthread_cond_broadcast(&global_stack_empty);
-    pthread_mutex_unlock(&global_stack_mutex);
+    unlock(&global_stack_mutex, "globalpush");
 }
 
 static Tour* globalpop(Stack* stack) {
-    pthread_mutex_lock(&global_stack_mutex);
+    lock(&global_stack_mutex, "globalpop");
     while (stack_empty(global_stack)) {
         if (++waiting_threads == nthreads) {
             pthread_cond_broadcast(&global_stack_empty);
-            pthread_mutex_unlock(&global_stack_mutex);
+            unlock(&global_stack_mutex, "globalpop-done");
             return NULL;
         }
         #if DEBUG
@@ -396,7 +416,7 @@ static Tour* globalpop(Stack* stack) {
         stack_push(stack, stack_pop(global_stack));
     // }
     pthread_cond_broadcast(&global_stack_full);
-    pthread_mutex_unlock(&global_stack_mutex);
+    unlock(&global_stack_mutex, "globalpop");
     return tour;
 }
 
