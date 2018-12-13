@@ -46,4 +46,5 @@ run: all
 
 clean:
 	$(RM) -r bin/
+	$(RM) -r *.o
 	cd src && $(MAKE) $@
