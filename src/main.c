@@ -364,11 +364,11 @@ static void globalpush(Stack* stack, Tour* tour) {
     while (stack_full(global_stack)) {
         wait_(&global_stack_full, &global_stack_mutex, "global_stack_full");
     }
-    // int half = (stack->size / 2) - 1;
-    // for (int i = 0; i < half; i++) {
-        stack_push(global_stack, stack_pop(stack));
-    // }
-    stack_push(global_stack, tour);
+    Tour* t;
+    while ((t = stack_pop(tour))) {
+        stack_push(global_stack, t);
+    }
+    stack_push(stack, tour);
     pthread_cond_broadcast(&global_stack_empty);
     unlock(&global_stack_mutex, "globalpush");
 }
@@ -385,10 +385,6 @@ static Tour* globalpop(Stack* stack) {
         waiting_threads--;
     }
     Tour* tour = stack_pop(global_stack);
-    // int half = (stack->size / 2) - 1;
-    // for (int i = 0; i < half; i++) {
-        stack_push(stack, stack_pop(global_stack));
-    // }
     pthread_cond_broadcast(&global_stack_full);
     unlock(&global_stack_mutex, "globalpop");
     return tour;
