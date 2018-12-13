@@ -21,7 +21,7 @@
 // constants
 const int MASTER = 0;
 const int START = 0;
-const int DEFAULT_STACK_SIZE = 64;
+int DEFAULT_STACK_SIZE;
 const int BIG_STACK_SIZE = 20000;
 
 // MPI
@@ -294,6 +294,7 @@ int main(int argc, char** argv) {
     graph_load(argv[1]);
     nthreads = atoi(argv[2]);
     ncities = graph_size;
+    DEFAULT_STACK_SIZE = ncities*ncities;
     double t1 = 0.0;
     double t2 = 0.0;
 
