@@ -4,7 +4,6 @@
 
 CC= mpicc
 CFLAGS= -Wall -Werror -std=c99
-# CFLAGS= -Wall -Wno-unused-function -g
 
 OBJS= main.o stack.o tour.o graph.o
 TO_BIN= ../bin/main

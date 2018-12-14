@@ -277,6 +277,8 @@ void worker(void) {
         pthread_join(tojoin[i], NULL);
     }
 
+    assert(stack_empty(global_stack));
+
     int data = 1;
     send_int(data, MASTER, MPI_TAG_DONE);
 
@@ -341,16 +343,28 @@ static void mpiassert(int result) {
 
 // important: does not free tour
 static void updatebest(Tour* tour) {
+    // updates local best first (more pruning)
     lock(&best_tour_mutex, "updatebest");
+    tour_free(best);
+    best = tour_copy(tour);
+    unlock(&best_tour_mutex, "updatebest");
 
     // sending a local best to master and potentially receiving a global best
-    send_int(rank, MASTER, MPI_TAG_SENDING_TOUR);
-    send_tour(tour, MASTER);
-    tour = receive_tour(MASTER);
+    lock(&best_tour_mutex, "updatebest");
+    Tour* auxiliary = NULL;
+    do {
+        if (auxiliary) {
+            tour_free(auxiliary);
+        }
+        send_int(rank, MASTER, MPI_TAG_SENDING_TOUR);
+        send_tour(best, MASTER);
+        auxiliary = receive_tour(MASTER);
+    } while (auxiliary->cost > best->cost);
 
     // replacing the best tour
     tour_free(best);
-    best = tour_copy(tour);
+    best = tour_copy(auxiliary);
+    tour_free(auxiliary);
 
     #if DEBUG
         printf("UPDATED BEST ");
